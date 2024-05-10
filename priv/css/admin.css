@@ -136,11 +136,7 @@ ul li #navhead a, ul li #navheadsub a, ul li #navheadsubsub a {
   margin-bottom: -1px;
 }
 thead tr td {
-  background: #3eaffa;
-  color: #fff;
-}
-thead tr td a {
-  color: #fff;
+  background: #cae7e4;
 }
 td.copy {
   text-align: center;
@@ -265,7 +261,7 @@ input,
 select {
   font-size: 1em;
 }
-p.result {
+.result {
   border: 1px;
   border-style: dashed;
   border-color: #FE8A02;
@@ -283,4 +279,19 @@ p.result {
 .btn-danger {
 	color: #cb2431;
 	transition: none;
+}
+h3.api {
+  border-bottom: 1px solid #b6b6b6;
+}
+details > summary {
+  background-color: #dbeceb;
+  border: none;
+  cursor: pointer;
+  list-style: none;
+  padding: 8px;
+}
+details > pre, details > p {
+  background-color: #e6f1f0;
+  margin: 0;
+  padding: 10px;
 }
