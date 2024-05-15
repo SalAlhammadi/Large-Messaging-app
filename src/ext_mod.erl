@@ -37,13 +37,14 @@
          config_dir/0, get_commands_spec/0]).
 -export([modules_configs/0, module_ebin_dir/1]).
 -export([compile_erlang_file/2, compile_elixir_file/2]).
--export([web_menu_node/3, web_page_node/5, get_page/3]).
+-export([web_menu_node/3, web_page_node/4, webadmin_node_contrib/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
 -include("ejabberd_commands.hrl").
+-include("ejabberd_http.hrl").
 -include("ejabberd_web_admin.hrl").
 -include("logger.hrl").
 -include("translate.hrl").
@@ -927,23 +928,27 @@ parse_details(Body) ->
 web_menu_node(Acc, _Node, Lang) ->
     Acc ++ [{<<"contrib">>, translate:translate(Lang, ?T("Contrib Modules"))}].
 
-web_page_node(_, Node, [<<"contrib">>], Query, Lang) ->
-    Res = rpc:call(Node, ?MODULE, get_page, [Node, Query, Lang]),
-    {stop, Res};
-web_page_node(Acc, _, _, _, _) ->
-    Acc.
-
-get_page(Node, Query, Lang) ->
-    QueryRes = list_modules_parse_query(Query),
+web_page_node(_, Node, #request{path = [<<"contrib">>], q = Query} = R, Lang) ->
     Title = ?H1GL(translate:translate(Lang, ?T("Contrib Modules")),
                   <<"../../developer/extending-ejabberd/modules/#ejabberd-contrib">>,
                   <<"ejabberd-contrib">>),
+    Res = [ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                  [webadmin_node_contrib, R, [{<<"node">>, Node},
+                                                              {<<"query">>, Query},
+                                                              {<<"lang">>, Lang}],
+                                   []])],
+    {stop, Title ++ Res};
+web_page_node(Acc, _, _, _) ->
+    Acc.
+
+webadmin_node_contrib(Node, Query, Lang) ->
+    QueryRes = list_modules_parse_query(Query),
     Contents = get_content(Node, Query, Lang),
     Result = case QueryRes of
                  ok -> [?XREST(?T("Submitted"))];
                  nothing -> []
              end,
-    Title ++ Result ++ Contents.
+    Result ++ Contents.
 
 get_module_home(Module, Attrs) ->
     case get_module_information(home, Attrs) of

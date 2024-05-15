@@ -39,14 +39,19 @@
 	 get_room_occupants_number/2, send_direct_invitation/5,
 	 change_room_option/4, get_room_options/2,
 	 set_room_affiliation/4, get_room_affiliations/2, get_room_affiliation/3,
-	 web_menu_main/2, web_page_main/2, web_menu_host/3,
 	 subscribe_room/4, subscribe_room_many/3,
 	 unsubscribe_room/2, get_subscribers/2,
 	 get_room_serverhost/1,
-	 web_page_host/3,
+	 web_menu_main/2, web_page_main/2,
+         web_menu_host/3, web_page_host/3,
+         web_menu_hostuser/4, web_page_hostuser/4,
+         webadmin_muc/1,
+         webadmin_host_muc_rooms/3,
 	 mod_opt_type/1, mod_options/1,
 	 get_commands_spec/0, find_hosts/1, room_diagnostics/2,
 	 get_room_pid/2, get_room_history/2]).
+
+-import(ejabberd_web_admin, [make_command/4]).
 
 -include("logger.hrl").
 -include_lib("xmpp/include/xmpp.hrl").
@@ -66,7 +71,10 @@ start(_Host, _Opts) ->
     {ok, [{hook, webadmin_menu_main, web_menu_main, 50, global},
 	  {hook, webadmin_page_main, web_page_main, 50, global},
 	  {hook, webadmin_menu_host, web_menu_host, 50},
-	  {hook, webadmin_page_host, web_page_host, 50}]}.
+	  {hook, webadmin_page_host, web_page_host, 50},
+	  {hook, webadmin_menu_hostuser, web_menu_hostuser, 50},
+	  {hook, webadmin_page_hostuser, web_page_hostuser, 50}
+         ]}.
 
 stop(Host) ->
     case gen_mod:is_loaded_elsewhere(Host, ?MODULE) of
@@ -478,7 +486,18 @@ get_commands_spec() ->
 			result = {history, {list,
 					    {entry, {tuple,
 						     [{timestamp, string},
-						      {message, string}]}}}}}
+						      {message, string}]}}}}},
+
+         #ejabberd_commands{name = webadmin_muc, tags = [internal],
+			desc = "Generate WebAdmin MUC HTML",
+			module = ?MODULE, function = webadmin_muc,
+			args = [{lang, binary}],
+			result = {res, any}},
+         #ejabberd_commands{name = webadmin_host_muc_rooms, tags = [internal],
+			desc = "Generate WebAdmin MUC Rooms HTML",
+			module = ?MODULE, function = webadmin_host_muc_rooms,
+			args = [{host, any}, {query, any}, {lang, binary}],
+			result = {res, any}}
 	].
 
 
@@ -598,36 +617,25 @@ web_menu_host(Acc, _Host, Lang) ->
 		       ?XC(<<"td">>, integer_to_binary(N))
 		      ])).
 
-web_page_main(_, #request{path=[<<"muc">>], lang = Lang} = _Request) ->
-    OnlineRoomsNumber = lists:foldl(
-			  fun(Host, Acc) ->
-				  Acc + mod_muc:count_online_rooms(Host)
-			  end, 0, find_hosts(global)),
+web_page_main(_, #request{path = [<<"muc">>], lang = Lang} = R) ->
     PageTitle = translate:translate(Lang, ?T("Multi-User Chat")),
-    Res = ?H1GL(PageTitle, <<"modules/#mod_muc">>, <<"mod_muc">>) ++
-	  [?XCT(<<"h3">>, ?T("Statistics")),
-	   ?XAE(<<"table">>, [],
-		[?XE(<<"tbody">>, [?TDTD(?T("Total rooms"), OnlineRoomsNumber)
-				  ])
-		]),
-	   ?XE(<<"ul">>, [?LI([?ACT(<<"rooms/">>, ?T("List of rooms"))])])
-	  ],
-    {stop, Res};
+    Title = ?H1GL(PageTitle, <<"modules/#mod_muc">>, <<"mod_muc">>),
+    Res = [make_command(webadmin_muc, R, [{<<"lang">>, Lang}], [])],
+    {stop, Title ++ Res};
 
-web_page_main(_, #request{path=[<<"muc">>, <<"rooms">>], q = Q, lang = Lang} = _Request) ->
-    Sort_query = get_sort_query(Q),
-    Res = make_rooms_page(global, Lang, Sort_query),
-    {stop, Res};
+web_page_main(_, #request{path = [<<"muc">>, <<"rooms">>], q = Q, lang = Lang} = R) ->
+    PageTitle = translate:translate(Lang, ?T("Multi-User Chat")),
+    Title = ?H1GL(PageTitle, <<"modules/#mod_muc">>, <<"mod_muc">>),
+    Res = [make_command(webadmin_host_muc_rooms, R, [{<<"host">>, global}, {<<"query">>, Q}, {<<"lang">>, Lang}], [])],
+    {stop, Title ++ Res};
 
 web_page_main(Acc, _) -> Acc.
 
-web_page_host(_, Host,
-	      #request{path = [<<"muc">>],
-		       q = Q,
-		       lang = Lang} = _Request) ->
-    Sort_query = get_sort_query(Q),
-    Res = make_rooms_page(Host, Lang, Sort_query),
-    {stop, Res};
+web_page_host(_, Host, #request{path = [<<"muc">>], q = Q, lang = Lang} = R) ->
+    PageTitle = translate:translate(Lang, ?T("Multi-User Chat")),
+    Title = ?H1GL(PageTitle, <<"modules/#mod_muc">>, <<"mod_muc">>),
+    Res = [make_command(webadmin_host_muc_rooms, R, [{<<"host">>, Host}, {<<"query">>, Q}, {<<"lang">>, Lang}], [])],
+    {stop, Title ++ Res};
 web_page_host(Acc, _, _) -> Acc.
 
 
@@ -646,7 +654,21 @@ get_sort_query2(Q) ->
 	false -> {ok, {reverse, abs(Integer)}}
     end.
 
-make_rooms_page(Host, Lang, {Sort_direction, Sort_column}) ->
+webadmin_muc(Lang) ->
+    OnlineRoomsNumber = lists:foldl(
+			  fun(Host, Acc) ->
+				  Acc + mod_muc:count_online_rooms(Host)
+			  end, 0, find_hosts(global)),
+    [?XCT(<<"h3">>, ?T("Statistics")),
+	   ?XAE(<<"table">>, [],
+		[?XE(<<"tbody">>, [?TDTD(?T("Total rooms"), OnlineRoomsNumber)
+				  ])
+		]),
+	   ?XE(<<"ul">>, [?LI([?ACT(<<"rooms/">>, ?T("List of rooms"))])])
+	  ].
+
+webadmin_host_muc_rooms(Host, Q, Lang) ->
+    {Sort_direction, Sort_column} = get_sort_query(Q),
     Service = find_service(Host),
     Rooms_names = get_online_rooms(Service),
     Rooms_infos = build_info_rooms(Rooms_names),
@@ -678,8 +700,6 @@ make_rooms_page(Host, Lang, {Sort_direction, Sort_column}) ->
 	  end,
 	  1,
 	  Titles),
-    PageTitle = translate:translate(Lang, ?T("Multi-User Chat")),
-    ?H1GL(PageTitle, <<"modules/#mod_muc">>, <<"mod_muc">>) ++
     [?XCT(<<"h2">>, ?T("Chatrooms")),
      ?XE(<<"table">>,
 	 [?XE(<<"thead">>,
@@ -766,6 +786,49 @@ justcreated_to_binary(J) when is_integer(J) ->
 	       [Year, Month, Day, Hour, Minute, Second]);
 justcreated_to_binary(J) when is_atom(J) ->
     misc:atom_to_binary(J).
+
+%%--------------------
+%% Web Admin Host User
+
+web_menu_hostuser(Acc, _Host, _Username, _Lang) ->
+    Acc ++ [{<<"muc-rooms">>, <<"MUC Rooms Online">>},
+            {<<"muc-affiliations">>, <<"MUC Rooms Affiliations">>},
+            {<<"muc-sub">>, <<"MUC Rooms Subscriptions">>},
+            {<<"muc-register">>, <<"MUC Service Registration">>}].
+
+web_page_hostuser(_, Host, User, #request{path = [<<"muc-rooms">> | RPath]} = R) ->
+    Res = ?H1GL(<<"MUC Rooms Online">>, <<"modules/#mod_muc">>, <<"mod_muc">>) ++
+        [make_command(get_user_rooms,
+                      R,
+                      [{<<"user">>, User}, {<<"host">>, Host}],
+                      [{table_options, {2, RPath}}])],
+    {stop, Res};
+
+web_page_hostuser(_, Host, User, #request{path = [<<"muc-affiliations">>]} = R) ->
+    Jid = jid:encode(jid:make(User, Host)),
+    Res = ?H1GL(<<"MUC Rooms Affiliations">>, <<"modules/#mod_muc">>, <<"mod_muc">>) ++
+        [make_command(set_room_affiliation, R, [{<<"jid">>, Jid}], []),
+	 make_command(get_room_affiliation, R, [{<<"jid">>, Jid}], [])],
+    {stop, Res};
+
+web_page_hostuser(_, Host, User, #request{path = [<<"muc-sub">>]} = R) ->
+    Subs = make_command(get_user_subscriptions, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+    Res = ?H1GLraw(<<"MUC Rooms Subscriptions">>,
+                   <<"developer/xmpp-clients-bots/extensions/muc-sub/">>,
+                   <<"MUC/Sub">>) ++
+        [Subs,
+         make_command(subscribe_room, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+	 make_command(unsubscribe_room, R, [{<<"user">>, User}, {<<"host">>, Host}], [])],
+    {stop, Res};
+
+web_page_hostuser(_, Host, User, #request{path = [<<"muc-register">>]} = R) ->
+    Jid = jid:encode(jid:make(User, Host)),
+    Res = ?H1GL(<<"MUC Service Registration">>, <<"modules/#mod_muc">>, <<"mod_muc">>) ++
+        [make_command(muc_register_nick, R, [{<<"jid">>, Jid}], []),
+	 make_command(muc_unregister_nick, R, [{<<"jid">>, Jid}], [])],
+    {stop, Res};
+
+web_page_hostuser(Acc, _, _, _) -> Acc.
 
 %%----------------------------
 %% Create/Delete Room
