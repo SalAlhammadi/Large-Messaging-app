@@ -188,7 +188,9 @@ list_commands(Version) ->
     Commands = get_commands_definition(Version),
     [{Name, Args, Desc} || #ejabberd_commands{name = Name,
                                               args = Args,
-                                              desc = Desc} <- Commands].
+                                              tags = Tags,
+                                              desc = Desc} <- Commands,
+                           not lists:member(internal, Tags)].
 
 -spec get_command_format(atom()) -> {[aterm()], [{atom(),atom()}], rterm()}.
 
@@ -289,7 +291,8 @@ get_tags_commands() ->
 get_tags_commands(Version) ->
     CommandTags = [{Name, Tags} ||
 		      #ejabberd_commands{name = Name, tags = Tags}
-			  <- get_commands_definition(Version)],
+			  <- get_commands_definition(Version),
+                          not lists:member(internal, Tags)],
     Dict = lists:foldl(
 	     fun({CommandNameAtom, CTags}, D) ->
 		     CommandName = atom_to_list(CommandNameAtom),
