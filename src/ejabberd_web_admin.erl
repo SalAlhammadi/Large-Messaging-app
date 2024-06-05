@@ -1661,7 +1661,7 @@ when
         | {result_links, [
             {
                 ResultName :: atom(),
-                LinkType :: host | node | user | arg_host | paragraph,
+                LinkType :: host | node | user | room | arg_host | paragraph,
                 Level :: integer(),
                 Append :: binary()
             }
@@ -1701,7 +1701,7 @@ when
         | {result_links, [
             {
                 ResultName :: atom(),
-                LinkType :: host | node | user | arg_host | paragraph,
+                LinkType :: host | node | user | room | arg_host | paragraph,
                 Level :: integer(),
                 Append :: binary()
             }
@@ -2256,6 +2256,23 @@ make_result(Binary, ElementName, _ArgumentsUsed, [{ResultName, user, Level, Appe
             UrlBinary = replace_url_elements(
                 [<<"server/">>, host, <<"/user/">>, user, <<"/">>, Append],
                 [{user, misc:url_encode(User)}, {host, Host}],
+                Level
+            ),
+            ?AC(UrlBinary, Binary);
+        false ->
+            ?C(Binary)
+    end;
+make_result(Binary, ElementName, _ArgumentsUsed, [{ResultName, room, Level, Append}]) when
+    (ElementName == ResultName) or (ElementName == unknown_element_name)
+->
+    Jid = jid:decode(Binary),
+    {Roomname, Service, _} = jid:split(Jid),
+    Host = ejabberd_router:host_of_route(Service),
+    case lists:member(Host, ejabberd_config:get_option(hosts)) of
+        true ->
+            UrlBinary = replace_url_elements(
+                [<<"server/">>, host, <<"/muc/rooms/room/">>, room, <<"/">>, Append],
+                [{room, misc:url_encode(Roomname)}, {host, Host}],
                 Level
             ),
             ?AC(UrlBinary, Binary);
