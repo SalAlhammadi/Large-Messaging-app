@@ -59,7 +59,7 @@
 
 	 % Roster
 	 add_rosteritem/7, delete_rosteritem/4,
-	 get_roster/2, push_roster/3,
+	 get_roster/2, get_roster_count/2, push_roster/3,
 	 push_roster_all/1, push_alltoall/2,
 	 push_roster_item/5, build_roster_item/3,
 
@@ -80,9 +80,17 @@
 	 % Stats
 	 stats/1, stats/2
 	]).
+-export([web_menu_main/2, web_page_main/2,
+         web_menu_host/3, web_page_host/3,
+         web_menu_hostuser/4, web_page_hostuser/4,
+         web_menu_hostnode/4, web_page_hostnode/5,
+         web_menu_node/3, web_page_node/4]).
 
+-import(ejabberd_web_admin, [make_command/4, make_table/2]).
 
 -include("ejabberd_commands.hrl").
+-include("ejabberd_http.hrl").
+-include("ejabberd_web_admin.hrl").
 -include("mod_roster.hrl").
 -include("mod_privacy.hrl").
 -include("ejabberd_sm.hrl").
@@ -94,7 +102,17 @@
 %%%
 
 start(_Host, _Opts) ->
-    ejabberd_commands:register_commands(?MODULE, get_commands_spec()).
+    ejabberd_commands:register_commands(?MODULE, get_commands_spec()),
+    {ok, [{hook, webadmin_menu_main, web_menu_main, 50, global},
+	  {hook, webadmin_page_main, web_page_main, 50, global},
+	  {hook, webadmin_menu_host, web_menu_host, 50},
+	  {hook, webadmin_page_host, web_page_host, 50},
+	  {hook, webadmin_menu_hostuser, web_menu_hostuser, 50},
+	  {hook, webadmin_page_hostuser, web_page_hostuser, 50},
+	  {hook, webadmin_menu_hostnode, web_menu_hostnode, 50},
+	  {hook, webadmin_page_hostnode, web_page_hostnode, 50},
+	  {hook, webadmin_menu_node, web_menu_node, 50, global},
+	  {hook, webadmin_page_node, web_page_node, 50, global}]}.
 
 stop(Host) ->
     case gen_mod:is_loaded_elsewhere(Host, ?MODULE) of
@@ -670,6 +688,16 @@ get_commands_spec() ->
 								      {pending, string},
 								      {groups, {list, {group, string}}}
 								     ]}}}}},
+     #ejabberd_commands{name = get_roster_count, tags = [roster],
+			desc = "Get number of contacts in a local user roster",
+			note = "added in 24.xx",
+                        policy = user,
+			module = ?MODULE, function = get_roster_count,
+			args = [],
+			args_rename = [{server, host}],
+			result_example = 5,
+			result_desc = "Number",
+			result = {value, integer}},
      #ejabberd_commands{name = push_roster, tags = [roster],
 			desc = "Push template roster from file to a user",
 			longdesc = "The text file must contain an erlang term: a list "
@@ -836,6 +864,18 @@ get_commands_spec() ->
 			result_example = 5,
 			result_desc = "Number",
 			result = {value, integer}},
+     #ejabberd_commands{name = get_offline_messages,
+			tags = [internal, offline],
+			desc = "Get the offline messages",
+			policy = user,
+			module = mod_offline, function = get_offline_messages,
+			args = [],
+			result = {queue, {list, {messages, {tuple, [{time, string},
+                                                                    {from, string},
+                                                                    {to, string},
+                                                                    {packet, string}
+                                                                   ]}}}}},
+
      #ejabberd_commands{name = send_message, tags = [stanza],
 			desc = "Send a message to a local or remote bare of full JID",
 			longdesc = "When sending a groupchat message to a MUC room, "
@@ -1586,6 +1626,15 @@ make_roster_xmlrpc(Roster) ->
       end,
       Roster).
 
+get_roster_count(User, Server) ->
+    case jid:make(User, Server) of
+	error ->
+	    throw({error, "Invalid 'user'/'server'"});
+	#jid{luser = U, lserver = S} ->
+	    Items = ejabberd_hooks:run_fold(roster_get, S, [], [{U, S}]),
+	    length(Items)
+    end.
+
 %%-----------------------------
 %% Push Roster from file
 %%-----------------------------
@@ -1914,6 +1963,204 @@ num_prio(Priority) when is_integer(Priority) ->
     Priority;
 num_prio(_) ->
     -1.
+
+%%%
+%%% Web Admin
+%%%
+
+%% emacs-indent-begin
+%% emacs-untabify-begin
+
+%%% Main
+
+web_menu_main(Acc, _Lang) ->
+    Acc ++ [{<<"stats">>, <<"Statistics">>}].
+
+web_page_main(_, #request{path = [<<"stats">>]} = R) ->
+    Res = ?H1GL(<<"Statistics">>, <<"modules/#mod_stats">>, <<"mod_stats">>) ++
+        [make_command(stats_host, R, [], [{only, presentation}]),
+         make_command(incoming_s2s_number, R, [], [{only, presentation}]),
+         make_command(outgoing_s2s_number, R, [], [{only, presentation}]),
+         make_table(
+           [<<"stat name">>, {<<"stat value">>, right}],
+           [{?C(<<"Registered Users:">>),
+             make_command(stats, R, [{<<"name">>, <<"registeredusers">>}], [{only, value}])},
+            {?C(<<"Online Users:">>),
+             make_command(stats, R, [{<<"name">>, <<"onlineusers">>}], [{only, value}])},
+            {?C(<<"S2S Connections Incoming:">>),
+             make_command(incoming_s2s_number, R, [], [{only, value}])},
+            {?C(<<"S2S Connections Outgoing:">>),
+             make_command(outgoing_s2s_number, R, [], [{only, value}])}
+           ])
+        ],
+    {stop, Res};
+web_page_main(Acc, _) -> Acc.
+
+%%% Host
+
+web_menu_host(Acc, _Host, _Lang) ->
+    Acc ++ [{<<"stats">>, <<"Statistics">>}].
+
+web_page_host(_, Host, #request{path = [<<"stats">>]} = R) ->
+    Res = ?H1GL(<<"Statistics">>, <<"modules/#mod_stats">>, <<"mod_stats">>) ++
+        [make_command(stats_host, R, [], [{only, presentation}]),
+         make_table(
+           [<<"stat name">>, {<<"stat value">>, right}],
+           [{?C(<<"Registered Users:">>),
+             make_command(stats_host, R,
+                          [{<<"host">>, Host},
+                           {<<"name">>, <<"registeredusers">>}],
+                          [{only, value},
+                           {result_links, [{stat, arg_host, 3, <<"users">>}]}
+                          ])},
+            {?C(<<"Online Users:">>),
+             make_command(stats_host, R,
+                          [{<<"host">>, Host},
+                           {<<"name">>, <<"onlineusers">>}],
+                          [{only, value},
+                           {result_links, [{stat, arg_host, 3, <<"online-users">>}]}
+                          ])}
+           ])
+        ],
+    {stop, Res};
+web_page_host(Acc, _, _) -> Acc.
+
+%%% HostUser
+
+web_menu_hostuser(Acc, _Host, _Username, _Lang) ->
+    Acc ++ [{<<"auth">>, <<"Authentication">>},
+            {<<"private">>, <<"Private XML Storage">>},
+            {<<"session">>, <<"Sessions">>},
+            {<<"vcard">>, <<"vCard">>}].
+
+web_page_hostuser(_, Host, User, #request{path = [<<"auth">>]} = R) ->
+    Res = ?H1GLraw(<<"Authentication">>, <<"admin/configuration/authentication/">>, <<"Authentication">>) ++
+        [make_command(register, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+         make_command(check_account, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+         make_command(check_password, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+         make_command(check_password_hash, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+         make_command(change_password, R, [{<<"user">>, User}, {<<"host">>, Host}], [{style, danger}]),
+         make_command(ban_account, R, [{<<"user">>, User}, {<<"host">>, Host}], [{style, danger}]),
+         make_command(unregister, R, [{<<"user">>, User}, {<<"host">>, Host}], [{style, danger}])],
+    {stop, Res};
+
+web_page_hostuser(_, Host, User, #request{path = [<<"private">>]} = R) ->
+    Res = ?H1GL(<<"Private XML Storage">>, <<"modules/#mod_private">>, <<"mod_private">>) ++
+        [make_command(private_set, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+         make_command(private_get, R, [{<<"user">>, User}, {<<"host">>, Host}], [])],
+    {stop, Res};
+
+web_page_hostuser(_, Host, User, #request{path = [<<"session">>]} = R) ->
+    Head = [?XC(<<"h1">>, <<"Sessions">>), ?BR],
+    Set = [make_command(resource_num, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+           make_command(set_presence, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+           make_command(kick_user, R, [{<<"user">>, User}, {<<"host">>, Host}], [{style, danger}]),
+           make_command(kick_session, R, [{<<"user">>, User}, {<<"host">>, Host}], [{style, danger}])],
+    timer:sleep(100), % kicking sessions takes a while, let's delay the get commands
+    Get = [make_command(user_sessions_info, R, [{<<"user">>, User}, {<<"host">>, Host}],
+                        [{result_links, [{node, node, 5, <<>>}]}]),
+           make_command(user_resources, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+           make_command(get_presence, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+           make_command(num_resources, R, [{<<"user">>, User}, {<<"host">>, Host}], [])],
+    {stop, Head ++ Get ++ Set};
+
+web_page_hostuser(_, Host, User, #request{path = [<<"vcard">>]} = R) ->
+    Head = ?H1GL(<<"vCard">>, <<"modules/#mod_vcard">>, <<"mod_vcard">>),
+    Set = [make_command(set_nickname, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+           make_command(set_vcard, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+           make_command(set_vcard2, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+           make_command(set_vcard2_multi, R, [{<<"user">>, User}, {<<"host">>, Host}], [])],
+    timer:sleep(100), % setting vcard takes a while, let's delay the get commands
+    FieldNames = [<<"VERSION">>, <<"FN">>, <<"NICKNAME">>, <<"BDAY">>],
+    FieldNames2 = [{<<"N">>, <<"FAMILY">>},
+                   {<<"N">>, <<"GIVEN">>},
+                   {<<"N">>, <<"MIDDLE">>},
+                   {<<"ADR">>, <<"CTRY">>},
+                   {<<"ADR">>, <<"LOCALITY">>},
+                   {<<"EMAIL">>, <<"USERID">>}],
+    Get = [make_command(get_vcard, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+           ?XE(<<"blockquote">>,[make_table(
+                                   [<<"name">>, <<"value">>],
+                                   [{?C(FieldName),
+                                     make_command(get_vcard, R,
+                                                  [{<<"user">>, User},
+                                                   {<<"host">>, Host},
+                                                   {<<"name">>, FieldName}],
+                                                  [{only, value}])}
+                                    || FieldName <- FieldNames]
+                                  )]),
+           make_command(get_vcard2, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
+           ?XE(<<"blockquote">>,[make_table(
+                                   [<<"name">>, <<"subname">>, <<"value">>],
+                                   [{?C(FieldName), ?C(FieldSubName),
+                                     make_command(get_vcard2, R,
+                                                  [{<<"user">>, User},
+                                                   {<<"host">>, Host},
+                                                   {<<"name">>, FieldName},
+                                                   {<<"subname">>, FieldSubName}],
+                                                  [{only, value}])}
+                                    || {FieldName, FieldSubName} <- FieldNames2]
+                                  )]),
+           make_command(get_vcard2_multi, R, [{<<"user">>, User}, {<<"host">>, Host}], [])],
+    {stop, Head ++ Get ++ Set};
+
+web_page_hostuser(Acc, _, _, _) -> Acc.
+
+%%% HostNode
+
+web_menu_hostnode(Acc, _Host, _Username, _Lang) ->
+    Acc ++ [{<<"modules">>, <<"Modules">>}].
+
+web_page_hostnode(_, Host, Node, #request{path = [<<"modules">>]} = R, _Lang) ->
+    Res = ?H1GLraw(<<"Modules">>, <<"admin/configuration/modules/">>, <<"Modules Options">>) ++
+        [ejabberd_cluster:call(Node, ejabberd_web_admin, make_command, [restart_module, R, [{<<"host">>, Host}], []])
+        ],
+    {stop, Res};
+
+web_page_hostnode(Acc, _Host, _Node, _Request, _Lang) ->
+    Acc.
+
+%%% Node
+
+web_menu_node(Acc, _Node, _Lang) ->
+    Acc ++ [{<<"stats">>, <<"Statistics">>}].
+
+web_page_node(_, Node, #request{path = [<<"stats">>]} = R, _Lang) ->
+    UpSecs = ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                   [stats, R,
+                                    [{<<"name">>, <<"uptimeseconds">>}],
+                                    [{only, value}]]),
+    UpDaysBin = integer_to_binary(binary_to_integer(fxml:get_tag_cdata(UpSecs)) div 24000),
+    UpDays = #xmlel{name = <<"code">>, attrs = [], children = [{xmlcdata, UpDaysBin}]},
+    Res = ?H1GL(<<"Statistics">>, <<"modules/#mod_stats">>, <<"mod_stats">>) ++
+        [make_command(stats, R, [], [{only, presentation}]),
+         make_table(
+           [<<"stat name">>, {<<"stat value">>, right}],
+           [{?C(<<"Online Users in this node:">>),
+             ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                   [stats, R,
+                                    [{<<"name">>, <<"onlineusersnode">>}],
+                                    [{only, value}]])},
+            {?C(<<"Uptime Seconds:">>),
+             UpSecs},
+            {?C(<<"Uptime Seconds (rounded to days):">>),
+             UpDays},
+            {?C(<<"Processes:">>),
+             ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                   [stats, R,
+                                    [{<<"name">>, <<"processes">>}],
+                                    [{only, value}]])}
+           ])
+        ],
+    {stop, Res};
+web_page_node(Acc, _, _, _) -> Acc.
+
+%% emacs-indent-end
+%% emacs-untabify-end
+
+%%%
+%%% Document
+%%%
 
 mod_options(_) -> [].
 

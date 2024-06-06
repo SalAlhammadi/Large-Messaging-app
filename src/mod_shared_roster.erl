@@ -31,6 +31,7 @@
 
 -export([start/2, stop/1, reload/3, export/1,
 	 import_info/0, webadmin_menu/3, webadmin_page/3,
+         webadmin_host_srg/3, webadmin_host_srg_group/4,
 	 get_user_roster/2,
 	 get_jid_info/4, import/5, process_item/2, import_start/2,
 	 in_subscription/2, out_subscription/1, c2s_self_presence/1,
@@ -41,6 +42,7 @@
 	 is_user_in_group/3, add_user_to_group/3, opts_to_binary/1,
 	 remove_user_from_group/3, mod_opt_type/1, mod_options/1, mod_doc/0, depends/2]).
 
+-import(ejabberd_web_admin, [make_command/4, make_command_raw_value/3, make_table/2, make_table/4]).
 -include("logger.hrl").
 
 -include_lib("xmpp/include/xmpp.hrl").
@@ -870,19 +872,26 @@ webadmin_menu(Acc, _Host, Lang) ->
 
 webadmin_page(_, Host,
 	      #request{us = _US, path = [<<"shared-roster">>],
-		       q = Query, lang = Lang} =
-		  _Request) ->
-    Res = list_shared_roster_groups(Host, Query, Lang),
-    {stop, Res};
+		       q = Query, lang = Lang} = R) ->
+    Head = ?H1GL((translate:translate(Lang, ?T("Shared Roster Groups"))), <<"modules/#mod_shared_roster">>, <<"mod_shared_roster">>),
+    Res = make_command(webadmin_host_srg, R, [{<<"host">>, Host},
+                                               {<<"query">>, Query},
+                                               {<<"lang">>, Lang}], []),
+    {stop, Head ++ [Res]};
+
 webadmin_page(_, Host,
 	      #request{us = _US, path = [<<"shared-roster">>, Group],
-		       q = Query, lang = Lang} =
-		  _Request) ->
-    Res = shared_roster_group(Host, Group, Query, Lang),
-    {stop, Res};
+		       q = Query, lang = Lang} = R) ->
+    Head = ?H1GL((translate:translate(Lang, ?T("Shared Roster Groups"))), <<"modules/#mod_shared_roster">>, <<"mod_shared_roster">>),
+    Res = make_command(webadmin_host_srg_group, R, [{<<"host">>, Host},
+                                                     {<<"group">>, Group},
+                                                     {<<"query">>, Query},
+                                                     {<<"lang">>, Lang}], []),
+    {stop, Head ++ [Res]};
+
 webadmin_page(Acc, _, _) -> Acc.
 
-list_shared_roster_groups(Host, Query, Lang) ->
+webadmin_host_srg(Host, Query, Lang) ->
     Res = list_sr_groups_parse_query(Host, Query),
     SRGroups = list_groups(Host),
     FGroups = (?XAE(<<"table">>, [],
@@ -911,9 +920,6 @@ list_shared_roster_groups(Host, Query, Lang) ->
 				       ?C(<<" ">>),
 				       ?INPUTT(<<"submit">>, <<"addnew">>,
 					       ?T("Add New"))])])]))])),
-    (?H1GL((translate:translate(Lang, ?T("Shared Roster Groups"))),
-	   <<"modules/#mod_shared_roster">>, <<"mod_shared_roster">>))
-      ++
       case Res of
 	ok -> [?XREST(?T("Submitted"))];
 	error -> [?XREST(?T("Bad format"))];
@@ -956,7 +962,7 @@ list_sr_groups_parse_delete(Host, Query) ->
 		  SRGroups),
     ok.
 
-shared_roster_group(Host, Group, Query, Lang) ->
+webadmin_host_srg_group(Host, Group, Query, Lang) ->
     Res = shared_roster_group_parse_query(Host, Group,
 					  Query),
     GroupOpts = get_group_opts(Host, Group),
@@ -1018,9 +1024,6 @@ shared_roster_group(Host, Group, Query, Lang) ->
 					     list_to_binary(FDisplayedGroups))]),
 			      ?XE(<<"td">>, [?CT(?T("Groups that will be displayed to the members"))])
 ])])])),
-    (?H1GL((translate:translate(Lang, ?T("Shared Roster Groups"))),
-	   <<"modules/#mod_shared_roster">>, <<"mod_shared_roster">>))
-      ++
       [?XC(<<"h2">>, translate:translate(Lang, ?T("Group")))] ++
 	case Res of
 	  ok -> [?XREST(?T("Submitted"))];

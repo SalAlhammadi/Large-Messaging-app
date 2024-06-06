@@ -82,7 +82,7 @@ can_access(Cmd, CallerInfo) ->
 	    case matches_definition(Def, Cmd, CallerModule, Tag, Host, CallerInfo) of
 		true ->
 		    ?DEBUG("Command '~p' execution allowed by rule "
-			   "'~ts' (CallerInfo=~p)", [Cmd, Name, CallerInfo]),
+			   "'~ts'~n (CallerInfo=~p)", [Cmd, Name, CallerInfo]),
 		    allow;
 		_ ->
 		    none
@@ -93,7 +93,7 @@ can_access(Cmd, CallerInfo) ->
     case Res of
 	allow -> allow;
 	_ ->
-	    ?DEBUG("Command '~p' execution denied "
+	    ?DEBUG("Command '~p' execution denied~n "
 		   "(CallerInfo=~p)", [Cmd, CallerInfo]),
 	    deny
     end.
@@ -344,10 +344,10 @@ validator(from) ->
     fun(L) when is_list(L) ->
 	    lists:map(
 	      fun({K, V}) -> {(econf:enum([tag]))(K), (econf:binary())(V)};
-		 (A) -> (econf:enum([ejabberd_xmlrpc, mod_cron, mod_http_api, ejabberd_ctl]))(A)
+		 (A) -> (econf:enum([ejabberd_xmlrpc, mod_cron, mod_http_api, ejabberd_ctl, ejabberd_web_admin]))(A)
 	      end, lists:flatten(L));
        (A) ->
-	    [(econf:enum([ejabberd_xmlrpc, mod_cron, mod_http_api, ejabberd_ctl]))(A)]
+	    [(econf:enum([ejabberd_xmlrpc, mod_cron, mod_http_api, ejabberd_ctl, ejabberd_web_admin]))(A)]
     end;
 validator(what) ->
     econf:and_then(
