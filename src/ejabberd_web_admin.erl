@@ -39,9 +39,7 @@
 
 %% Internal commands
 -export([webadmin_host_last_activity/3,
-         webadmin_node_db/3,
-         webadmin_node_db_table/3,
-         webadmin_node_db_table_page/4]).
+         webadmin_node_db_table_page/3]).
 
 -include_lib("xmpp/include/xmpp.hrl").
 -include("ejabberd_commands.hrl").
@@ -1032,35 +1030,13 @@ get_node(Host, Node, [], _Request, Lang) ->
     MenuItems2 = make_menu_items(Host, Node, Base, Lang, []),
     [?XC(<<"h1">>, (str:translate_and_format(Lang, ?T("Node ~p"), [Node]))),
      ?XE(<<"ul">>, MenuItems2)];
-get_node(global, Node, [<<"db">>], #request{q = Query} = R, Lang) ->
-    Head = ?XC(<<"h1">>,
-               (str:translate_and_format(Lang,
-                                         ?T("Database Tables at ~p"),
-                                         [Node]))),
-    Res = make_command(webadmin_node_db, R, [{<<"node">>, Node},
-                                             {<<"query">>, Query},
-                                             {<<"lang">>, Lang}], []),
-    [Head, Res];
-get_node(global, Node, [<<"db">>, TableName], R, Lang) ->
-    Head = ?XC(<<"h1">>,
-               (str:translate_and_format(Lang,
-                                         ?T("Database Tables at ~p"),
-                                         [Node]))),
-    Res = make_command(webadmin_node_db_table, R, [{<<"node">>, Node},
-                                             {<<"table">>, TableName},
-                                             {<<"lang">>, Lang}], []),
-    [Head, Res];
-get_node(global, Node, [<<"db">>, TableName, PageNumber], R, Lang) ->
-    Head = ?XC(<<"h1">>,
-               (str:translate_and_format(Lang,
-                                         ?T("Database Tables at ~p"),
-                                         [Node]))),
-    Res = make_command(webadmin_node_db_table_page, R, [{<<"node">>, Node},
-                                             {<<"table">>, TableName},
-                                             {<<"lang">>, Lang},
-                                             {<<"page">>, PageNumber}
-                                                       ], []),
-    [Head, Res];
+
+get_node(global, Node, [<<"db">> | RPath], #request{q = _Query} = R, Lang) ->
+    PageTitle = translate:translate(Lang, ?T("Mnesia Tables")),
+    Title = ?XC(<<"h1">>, PageTitle),
+    Level = length(RPath),
+    [Title, ?BR | webadmin_db(Node, RPath, R, Level)];
+
 get_node(global, Node, [<<"backup">>], R, Lang) ->
     Types = [{<<"#binary">>, <<"Binary">>},
              {<<"#plaintext">>, <<"Plain Text">>},
@@ -1137,154 +1113,6 @@ get_node(Host, Node, _NPath, Request, Lang) ->
 
 %%%==================================
 %%%% node parse
-
-webadmin_node_db(Node, Query, Lang) ->
-    case ejabberd_cluster:call(Node, mnesia, system_info, [tables]) of
-      {badrpc, _Reason} ->
-	  [?XCT(<<"h1">>, ?T("RPC Call Error"))];
-      Tables ->
-	  ResS = case node_db_parse_query(Node, Tables, Query) of
-		   nothing -> [];
-		   ok -> [?XREST(?T("Submitted"))]
-		 end,
-	  STables = lists:sort(Tables),
-	  Rows = lists:map(fun (Table) ->
-				   STable =
-				       iolist_to_binary(atom_to_list(Table)),
-				   TInfo = case ejabberd_cluster:call(Node, mnesia,
-							 table_info,
-							 [Table, all])
-					       of
-					     {badrpc, _} -> [];
-					     I -> I
-					   end,
-				   {Type, Size, Memory} = case
-							    {lists:keysearch(storage_type,
-									     1,
-									     TInfo),
-							     lists:keysearch(size,
-									     1,
-									     TInfo),
-							     lists:keysearch(memory,
-									     1,
-									     TInfo)}
-							      of
-							    {{value,
-							      {storage_type,
-							       T}},
-							     {value, {size, S}},
-							     {value,
-							      {memory, M}}} ->
-								{T, S, M};
-							    _ -> {unknown, 0, 0}
-							  end,
-				   MemoryB = Memory*erlang:system_info(wordsize),
-				   ?XE(<<"tr">>,
-				       [?XE(<<"td">>,
-					  [?AC(<<"./", STable/binary,
-						 "/">>,
-					       STable)]),
-					?XE(<<"td">>,
-					    [db_storage_select(STable, Type,
-							       Lang)]),
-				        ?XAE(<<"td">>,
-					     [{<<"class">>, <<"alignright">>}],
-					      [?AC(<<"./", STable/binary,
-						 "/1/">>,
-					     (pretty_string_int(Size)))]),
-					?XAC(<<"td">>,
-					     [{<<"class">>, <<"alignright">>}],
-					     (pretty_string_int(MemoryB)))])
-			   end,
-			   STables),
-	    ResS ++
-	      [?XAE(<<"form">>,
-		    [{<<"action">>, <<"">>}, {<<"method">>, <<"post">>}],
-		    [?XAE(<<"table">>, [],
-			  [?XE(<<"thead">>,
-			       [?XE(<<"tr">>,
-				    [?XCT(<<"td">>, ?T("Name")),
-				     ?XCT(<<"td">>, ?T("Storage Type")),
-				     ?XACT(<<"td">>,
-                                           [{<<"class">>, <<"alignright">>}],
-                                           ?T("Elements")),
-				     ?XACT(<<"td">>,
-                                           [{<<"class">>, <<"alignright">>}],
-                                           ?T("Memory"))])]),
-			   ?XE(<<"tbody">>,
-			       (Rows ++
-				  [?XE(<<"tr">>,
-				       [?XAE(<<"td">>,
-					     [{<<"colspan">>, <<"4">>},
-					      {<<"class">>, <<"alignright">>}],
-					     [?INPUTT(<<"submit">>,
-						      <<"submit">>,
-						      ?T("Submit"))])])]))])])]
-    end.
-
-db_storage_select(ID, Opt, Lang) ->
-    ?XAE(<<"select">>,
-	 [{<<"name">>, <<"table", ID/binary>>}],
-	 (lists:map(fun ({O, Desc}) ->
-			    Sel = if O == Opt ->
-					 [{<<"selected">>, <<"selected">>}];
-				     true -> []
-				  end,
-			    ?XACT(<<"option">>,
-				  (Sel ++
-				     [{<<"value">>,
-				       iolist_to_binary(atom_to_list(O))}]),
-				  Desc)
-		    end,
-		    [{ram_copies, ?T("RAM copy")},
-		     {disc_copies, ?T("RAM and disc copy")},
-		     {disc_only_copies, ?T("Disc only copy")},
-		     {unknown, ?T("Remote copy")},
-		     {delete_content, ?T("Delete content")},
-		     {delete_table, ?T("Delete table")}]))).
-
-node_db_parse_query(_Node, _Tables, [{nokey, <<>>}]) ->
-    nothing;
-node_db_parse_query(Node, Tables, Query) ->
-    lists:foreach(fun (Table) ->
-			  STable = iolist_to_binary(atom_to_list(Table)),
-			  case lists:keysearch(<<"table", STable/binary>>, 1,
-					       Query)
-			      of
-			    {value, {_, SType}} ->
-				Type = case SType of
-					 <<"unknown">> -> unknown;
-					 <<"ram_copies">> -> ram_copies;
-					 <<"disc_copies">> -> disc_copies;
-					 <<"disc_only_copies">> ->
-					     disc_only_copies;
-					 <<"delete_content">> -> delete_content;
-					 <<"delete_table">> -> delete_table;
-					 _ -> false
-				       end,
-				if Type == false -> ok;
-				   Type == delete_content ->
-				       mnesia:clear_table(Table);
-				   Type == delete_table ->
-				       mnesia:delete_table(Table);
-				   Type == unknown ->
-				       mnesia:del_table_copy(Table, Node);
-				   true ->
-				       case mnesia:add_table_copy(Table, Node,
-								  Type)
-					   of
-					 {aborted, _} ->
-					     mnesia:change_table_copy_type(Table,
-									   Node,
-									   Type);
-					 _ -> ok
-				       end
-				end;
-			    _ -> ok
-			  end
-		  end,
-		  Tables),
-    ok.
 
 pretty_print_xml(El) ->
     list_to_binary(pretty_print_xml(El, <<"">>)).
@@ -1369,49 +1197,7 @@ pretty_string_int(String) when is_binary(String) ->
 %%%==================================
 %%%% mnesia table view
 
-webadmin_node_db_table(Node, STable, Lang) ->
-    Table = misc:binary_to_atom(STable),
-    TInfo = ejabberd_cluster:call(Node, mnesia, table_info, [Table, all]),
-    {value, {storage_type, Type}} = lists:keysearch(storage_type, 1, TInfo),
-    {value, {size, Size}} = lists:keysearch(size, 1, TInfo),
-    {value, {memory, Memory}} = lists:keysearch(memory, 1, TInfo),
-    MemoryB = Memory*erlang:system_info(wordsize),
-    TableInfo = str:format("~p", [TInfo]),
-    [?XC(<<"h1">>, (str:translate_and_format(Lang, ?T("Database Tables at ~p"),
-                                             [Node]))),
-     ?XAE(<<"table">>, [],
-	  [?XE(<<"tbody">>,
-	       [?XE(<<"tr">>,
-		    [?XCT(<<"td">>, ?T("Name")),
-		     ?XAC(<<"td">>, [{<<"class">>, <<"alignright">>}],
-                          STable
-                         )]),
-		?XE(<<"tr">>,
-		    [?XCT(<<"td">>, ?T("Node")),
-		     ?XAC(<<"td">>, [{<<"class">>, <<"alignright">>}],
-                          misc:atom_to_binary(Node)
-                         )]),
-		?XE(<<"tr">>,
-		    [?XCT(<<"td">>, ?T("Storage Type")),
-		     ?XAC(<<"td">>, [{<<"class">>, <<"alignright">>}],
-                          misc:atom_to_binary(Type)
-                         )]),
-		?XE(<<"tr">>,
-		    [?XCT(<<"td">>, ?T("Elements")),
-                     ?XAE(<<"td">>,
-                          [{<<"class">>, <<"alignright">>}],
-                          [?AC(<<"1/">>,
-                               (pretty_string_int(Size)))])
-                    ]),
-		?XE(<<"tr">>,
-		    [?XCT(<<"td">>, ?T("Memory")),
-		     ?XAC(<<"td">>, [{<<"class">>, <<"alignright">>}],
-                          (pretty_string_int(MemoryB))
-                         )])
-               ])]),
-     ?XC(<<"pre">>, TableInfo)].
-
-webadmin_node_db_table_page(Node, STable, Lang, PageNumber) ->
+webadmin_node_db_table_page(Node, STable, PageNumber) ->
     Table = misc:binary_to_atom(STable),
     TInfo = ejabberd_cluster:call(Node, mnesia, table_info, [Table, all]),
     {value, {storage_type, Type}} = lists:keysearch(storage_type, 1, TInfo),
@@ -1420,10 +1206,7 @@ webadmin_node_db_table_page(Node, STable, Lang, PageNumber) ->
     TableContentErl = get_table_content(Node, Table, Type, PageNumber, PageSize),
     TableContent = str:format("~p", [TableContentErl]),
     PagesLinks = build_elements_pages_list(Size, PageNumber, PageSize),
-    [?XC(<<"h1">>, (str:translate_and_format(Lang, ?T("Database Tables at ~p"),
-                                             [Node]))),
-     ?P, ?AC(<<"../">>, STable), ?P
-    ] ++ PagesLinks ++ [?XC(<<"pre">>, TableContent)].
+    [?P] ++ PagesLinks ++ [?XC(<<"pre">>, TableContent)].
 
 build_elements_pages_list(Size, PageNumber, PageSize) ->
     PagesNumber = calculate_pages_number(Size, PageSize),
@@ -1454,6 +1237,97 @@ get_table_content(Node, Table, _Type, PageNumber, PageSize) ->
     Res = [ejabberd_cluster:call(Node, mnesia, dirty_read, [Table, Key])
            || Key <- Keys],
     lists:flatten(Res).
+
+webadmin_db(Node, [<<"table">>, TableName, <<"details">> | RPath], R, Level) ->
+    Service = <<"Mnesia Tables">>,
+    Breadcrumb = make_breadcrumb({table_section, Level, Service, TableName, <<"Details">>, RPath}),
+    Get = [ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                  [mnesia_table_details, R, [{<<"table">>, TableName}], []])],
+    Breadcrumb ++ Get;
+
+webadmin_db(Node, [<<"table">>, TableName, <<"elements">>, PageNumber | RPath], R, Level) ->
+    Service = <<"Mnesia Tables">>,
+    Breadcrumb = make_breadcrumb({table_section, Level, Service, TableName, <<"Elements">>, RPath}),
+    Get = [ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                  [webadmin_node_db_table_page, R, [{<<"node">>, Node},
+                                                                    {<<"table">>, TableName},
+                                                                    {<<"page">>, PageNumber}], []])],
+    Breadcrumb ++ Get;
+
+webadmin_db(Node, [<<"table">>, TableName, <<"change-storage">> | RPath], R, Level) ->
+    Service = <<"Mnesia Tables">>,
+    Breadcrumb = make_breadcrumb({table_section, Level, Service, TableName, <<"Change Storage">>, RPath}),
+    Set = [ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                  [mnesia_table_change_storage, R, [{<<"table">>, TableName}], []])],
+    Breadcrumb ++ Set;
+
+webadmin_db(Node, [<<"table">>, TableName, <<"clear">> | RPath], R, Level) ->
+    Service = <<"Mnesia Tables">>,
+    Breadcrumb = make_breadcrumb({table_section, Level, Service, TableName, <<"Clear Content">>, RPath}),
+    Set = [ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                  [mnesia_table_clear, R, [{<<"table">>, TableName}], [{style, danger}]])],
+    Breadcrumb ++ Set;
+
+webadmin_db(Node, [<<"table">>, TableName, <<"destroy">> | RPath], R, Level) ->
+    Service = <<"Mnesia Tables">>,
+    Breadcrumb = make_breadcrumb({table_section, Level, Service, TableName, <<"Destroy Table">>, RPath}),
+    Set = [ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                  [mnesia_table_destroy, R, [{<<"table">>, TableName}], [{style, danger}]])],
+    Breadcrumb ++ Set;
+
+webadmin_db(_Node, [<<"table">>, TableName | _RPath], _R, Level) ->
+    Service = <<"Mnesia Tables">>,
+    Breadcrumb = make_breadcrumb({table, Level, Service, TableName}),
+    MenuItems = [{<<"details/">>, <<"Details">>},
+                 {<<"elements/1/">>, <<"Elements">>},
+                 {<<"change-storage/">>, <<"Change Storage">>},
+                 {<<"clear/">>, <<"Clear Content">>},
+                 {<<"destroy/">>, <<"Destroy Table">>}
+                ],
+    Get = [?XE(<<"ul">>, [?LI([?AC(MIU, MIN)]) || {MIU, MIN} <- MenuItems])],
+    Breadcrumb ++ Get;
+
+webadmin_db(Node, _RPath, R, _Level) ->
+    Service = <<"Mnesia Tables">>,
+    Breadcrumb = make_breadcrumb({service, Service}),
+    Get = [ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                  [mnesia_list_tables, R, [],
+                                   [{result_links, [{name, mnesia_table, 3, <<"">>}]}]])],
+    Breadcrumb ++ Get.
+
+make_breadcrumb({service, Service}) ->
+    make_breadcrumb([Service]);
+
+make_breadcrumb({table, Level, Service, Name}) ->
+    make_breadcrumb(
+      [{Level, Service},
+       separator,
+       Name
+      ]);
+
+make_breadcrumb({table_section, Level, Service, Name, Section, RPath}) ->
+    make_breadcrumb([{Level, Service},
+                     separator,
+                     {Level-2, Name},
+                     separator,
+                     Section
+                    | RPath]);
+
+make_breadcrumb(Elements) ->
+    lists:map(fun({xmlel, _, _, _} = Xmlel) ->
+                      Xmlel;
+                 (<<"sort">>) ->
+                      ?C(<<" +">>);
+                 (<<"page">>) ->
+                      ?C(<<" #">>);
+                 (separator) ->
+                      ?C(<<" > ">>);
+                 (Bin) when is_binary(Bin) ->
+                      ?C(Bin);
+                 ({Level, Bin}) when is_integer(Level) and is_binary(Bin) ->
+                      ?AC(binary:copy(<<"../">>, Level), Bin)
+              end,
+              Elements).
 
 %%%==================================
 %%%% navigation menu

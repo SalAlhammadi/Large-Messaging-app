@@ -64,7 +64,12 @@
 	 gc/0,
 	 get_commands_spec/0,
 	 delete_old_messages_batch/4, delete_old_messages_status/1, delete_old_messages_abort/1,
-	 %% WebAdmin
+	 %% Internal
+	 mnesia_list_tables/0,
+	 mnesia_table_details/1,
+	 mnesia_table_change_storage/2,
+	 mnesia_table_clear/1,
+	 mnesia_table_delete/1,
 	 echo/1]).
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -77,6 +82,7 @@
 -include("ejabberd_http.hrl").
 -include("ejabberd_web_admin.hrl").
 -include("logger.hrl").
+-include("translate.hrl"). %+++ TODO
 
 -record(state, {}).
 
@@ -548,9 +554,41 @@ get_commands_spec() ->
      #ejabberd_commands{name = webadmin_node_db_table_page, tags = [internal],
 			desc = "Generate WebAdmin Mnesia database HTML for a table content",
 			module = ejabberd_web_admin, function = webadmin_node_db_table_page,
-			args = [{node, atom}, {table, binary}, {lang, binary}, {page, integer}],
+			args = [{node, atom}, {table, binary}, {page, integer}],
 			result = {res, any}},
 
+     #ejabberd_commands{name = mnesia_list_tables, tags = [internal, mnesia],
+                        desc = "List of Mnesia tables",
+                        module = ?MODULE, function = mnesia_list_tables,
+			result = {tables, {list, {table, {tuple, [{name, atom},
+                                                                {storage_type, binary},
+                                                                {elements, integer},
+                                                                {memory_kb, integer},
+                                                                {memory_mb, integer}
+                                                               ]}}}}},
+     #ejabberd_commands{name = mnesia_table_details, tags = [internal, mnesia],
+                        desc = "Get details of a Mnesia table",
+                        module = ?MODULE, function = mnesia_table_details,
+			args = [{table, binary}],
+			result = {details, {list, {detail, {tuple, [{name, atom},
+                                                                {value, binary}
+                                                               ]}}}}},
+
+     #ejabberd_commands{name = mnesia_table_change_storage, tags = [internal, mnesia],
+                        desc = "Change storage type of a Mnesia table to: ram_copies, disc_copies, or disc_only_copies.",
+                        module = ?MODULE, function = mnesia_table_change_storage,
+			args = [{table, binary}, {storage_type, binary}],
+			result = {res, restuple}},
+     #ejabberd_commands{name = mnesia_table_clear, tags = [internal, mnesia],
+                        desc = "Delete all content in a Mnesia table",
+                        module = ?MODULE, function = mnesia_table_clear,
+			args = [{table, binary}],
+			result = {res, restuple}},
+     #ejabberd_commands{name = mnesia_table_destroy, tags = [internal, mnesia],
+                        desc = "Destroy a Mnesia table",
+                        module = ?MODULE, function = mnesia_table_destroy,
+			args = [{table, binary}],
+			result = {res, restuple}},
      #ejabberd_commands{name = echo, tags = [internal],
                         desc = "Return the same sentence that was provided",
                         module = ?MODULE, function = echo,
@@ -1155,6 +1193,72 @@ is_my_host(Host) ->
     end.
 
 %%%
+%%% Internal
+%%%
+
+%% emacs-indent-begin
+%% emacs-untabify-begin
+
+
+%% mnesia:del_table_copy(Table, Node);
+%% mnesia:change_table_copy_type(Table, Node, Type);
+
+mnesia_table_change_storage(STable, SType) ->
+    Table = binary_to_existing_atom(STable),
+    Type = case SType of
+               <<"ram_copies">> -> ram_copies;
+               <<"disc_copies">> -> disc_copies;
+               <<"disc_only_copies">> -> disc_only_copies;
+               _ -> false
+           end,
+    mnesia:add_table_copy(Table, node(), Type).
+
+mnesia_table_clear(STable) ->
+    Table = binary_to_existing_atom(STable),
+    mnesia:clear_table(Table).
+
+mnesia_table_delete(STable) ->
+    Table = binary_to_existing_atom(STable),
+    mnesia:delete_table(Table).
+
+mnesia_table_details(STable) ->
+    Table = binary_to_existing_atom(STable),
+    [{Name, iolist_to_binary(str:format("~p", [Value]))} || {Name, Value} <- mnesia:table_info(Table, all)].
+
+mnesia_list_tables() ->
+    STables = lists:sort(mnesia:system_info(tables)),
+    lists:map(fun(Table) ->
+                      TInfo = mnesia:table_info(Table, all),
+                      {value, {storage_type, Type}} = lists:keysearch(storage_type, 1, TInfo),
+                      {value, {size, Size}} = lists:keysearch(size, 1, TInfo),
+                      {value, {memory, Memory}} = lists:keysearch(memory, 1, TInfo),
+                      MemoryB = (Memory*erlang:system_info(wordsize)),
+                      MemoryKB = MemoryB div 1024,
+                      MemoryMB = MemoryKB div 1024,
+                      {Table,
+                       storage_type_bin(Type),
+                       Size,
+                       MemoryKB,
+                       MemoryMB}
+              end,
+              STables).
+
+
+storage_type_bin(ram_copies) ->
+    <<"RAM copy">>;
+storage_type_bin(disc_copies) ->
+    <<"RAM and disc copy">>;
+storage_type_bin(disc_only_copies) ->
+    <<"Disc only copy">>;
+storage_type_bin(unknown) ->
+    <<"Remote copy">>.
+
+
+echo(Sentence) ->
+    Sentence.
+
+
+%%%
 %%% Web Admin
 %%%
 
@@ -1173,17 +1277,17 @@ web_page_node(_, Node, #request{path = [<<"cluster">>]} = R, _Lang) ->
     Set1 = [ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
                                   [join_cluster, R, [],
                                    [{style, danger}]]),
-           ?XE(<<"blockquote">>,[?C(Hint)]),
-           ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
-                                 [leave_cluster, R, [],
-                                  [{style, danger}]])],
+            ?XE(<<"blockquote">>,[?C(Hint)]),
+            ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                  [leave_cluster, R, [],
+                                   [{style, danger}]])],
     Set2 = [ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
                                   [set_master, R, [],
                                    [{style, danger}]])],
     timer:sleep(100), % leaving a cluster takes a while, let's delay the get commands
     Get1 = [ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
-                                 [list_cluster_detailed, R, [],
-                                  [{result_links, [{name, node, 3, <<"">>}]}]])],
+                                  [list_cluster_detailed, R, [],
+                                   [{result_links, [{name, node, 3, <<"">>}]}]])],
     Get2 = [ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
                                   [get_master, R, [],
                                    [{result_named, true},
@@ -1193,9 +1297,9 @@ web_page_node(_, Node, #request{path = [<<"cluster">>]} = R, _Lang) ->
 web_page_node(_, Node, #request{path = [<<"update">>]} = R, _Lang) ->
     Head = [?XC(<<"h1">>, <<"Code Update">>)],
     Set = [ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
-                               [update, R])],
+                                 [update, R])],
     Get = [ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
-                               [update_list, R])],
+                                 [update_list, R])],
     {stop, Head ++ Get ++ Set};
 
 web_page_node(_, Node, #request{path = [<<"config">>]} = R, _Lang) ->
@@ -1212,14 +1316,14 @@ web_page_node(_, Node, #request{path = [<<"config">>]} = R, _Lang) ->
 
 web_page_node(_, Node, #request{path = [<<"stop">>]} = R, _Lang) ->
     Res = [?XC(<<"h1">>, <<"Stop This Node">>),
-         ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
-                               [restart, R, [], [{style, danger}]]),
-         ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
-                               [stop_kindly, R, [], [{style, danger}]]),
-         ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
-                               [stop, R, [], [{style, danger}]]),
-         ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
-                               [halt, R, [], [{style, danger}]])],
+           ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                 [restart, R, [], [{style, danger}]]),
+           ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                 [stop_kindly, R, [], [{style, danger}]]),
+           ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                 [stop, R, [], [{style, danger}]]),
+           ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
+                                 [halt, R, [], [{style, danger}]])],
     {stop, Res};
 
 web_page_node(_, Node, #request{path = [<<"logs">>]} = R, _Lang) ->
@@ -1235,5 +1339,5 @@ web_page_node(_, Node, #request{path = [<<"logs">>]} = R, _Lang) ->
     {stop, Res};
 web_page_node(Acc, _, _, _) -> Acc.
 
-echo(Sentence) ->
-    Sentence.
+%% emacs-indent-end
+%% emacs-untabify-end
