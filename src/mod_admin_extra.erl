@@ -1982,7 +1982,7 @@ web_page_main(_, #request{path = [<<"stats">>]} = R) ->
          make_command(incoming_s2s_number, R, [], [{only, presentation}]),
          make_command(outgoing_s2s_number, R, [], [{only, presentation}]),
          make_table(
-           [<<"Stat Name">>, {<<"Stat value">>, right}],
+           [<<"stat name">>, {<<"stat value">>, right}],
            [{?C(<<"Registered Users:">>),
              make_command(stats, R, [{<<"name">>, <<"registeredusers">>}], [{only, value}])},
             {?C(<<"Online Users:">>),
@@ -2005,7 +2005,7 @@ web_page_host(_, Host, #request{path = [<<"stats">>]} = R) ->
     Res = ?H1GL(<<"Statistics">>, <<"modules/#mod_stats">>, <<"mod_stats">>) ++
         [make_command(stats_host, R, [], [{only, presentation}]),
          make_table(
-           [<<"Stat Name">>, {<<"Stat value">>, right}],
+           [<<"stat name">>, {<<"stat value">>, right}],
            [{?C(<<"Registered Users:">>),
              make_command(stats_host, R,
                           [{<<"host">>, Host},
@@ -2080,7 +2080,7 @@ web_page_hostuser(_, Host, User, #request{path = [<<"vcard">>]} = R) ->
                    {<<"EMAIL">>, <<"USERID">>}],
     Get = [make_command(get_vcard, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
            ?XE(<<"blockquote">>,[make_table(
-                                   [<<"Name">>, <<"Value">>],
+                                   [<<"name">>, <<"value">>],
                                    [{?C(FieldName),
                                      make_command(get_vcard, R,
                                                   [{<<"user">>, User},
@@ -2091,7 +2091,7 @@ web_page_hostuser(_, Host, User, #request{path = [<<"vcard">>]} = R) ->
                                   )]),
            make_command(get_vcard2, R, [{<<"user">>, User}, {<<"host">>, Host}], []),
            ?XE(<<"blockquote">>,[make_table(
-                                   [<<"Name">>, <<"Subname">>, <<"Value">>],
+                                   [<<"name">>, <<"subname">>, <<"value">>],
                                    [{?C(FieldName), ?C(FieldSubName),
                                      make_command(get_vcard2, R,
                                                   [{<<"user">>, User},
@@ -2135,7 +2135,7 @@ web_page_node(_, Node, #request{path = [<<"stats">>]} = R, _Lang) ->
     Res = ?H1GL(<<"Statistics">>, <<"modules/#mod_stats">>, <<"mod_stats">>) ++
         [make_command(stats, R, [], [{only, presentation}]),
          make_table(
-           [<<"Stat Name">>, {<<"Stat value">>, right}],
+           [<<"stat name">>, {<<"stat value">>, right}],
            [{?C(<<"Online Users in this node:">>),
              ejabberd_cluster:call(Node, ejabberd_web_admin, make_command,
                                    [stats, R,

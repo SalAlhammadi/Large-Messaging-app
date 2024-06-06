@@ -523,7 +523,7 @@ process_admin(global, #request{path = [<<"vhosts">> | RPath], lang = Lang} = R, 
     Level = 1 + length(RPath),
     Table = make_table(
               20, RPath,
-              [<<"Host">>, {<<"Registered Users">>, right}, {<<"Online Users">>, right}],
+              [<<"host">>, {<<"registered users">>, right}, {<<"online users">>, right}],
               [{make_command(echo,
                              R,
                              [{<<"sentence">>, Host}],
