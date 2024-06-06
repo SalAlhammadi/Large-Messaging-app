@@ -1775,7 +1775,7 @@ make_command2(
             {_, {_, restuple}} -> manual;
             _ -> auto
         end,
-    PresentationEls = make_command_presentation(Name),
+    PresentationEls = make_command_presentation(Name, C#ejabberd_commands.tags),
     Query = Request#request.q,
     {ArgumentsUsed1, ExecRes} = execute_command(
         Name, Query, BaseArguments, Method, ArgumentsFormat, CallerInfo, InputNameAppend
@@ -1866,33 +1866,39 @@ lists_zipwith3(Combine, List1, List2, List3, How) ->
 %%%==================================
 %%%% make_command: presentation
 
-make_command_presentation(Name) ->
+make_command_presentation(Name, Tags) ->
     NameBin = misc:atom_to_binary(Name),
     NiceNameBin = nice_this(Name),
     Text = ejabberd_ctl:get_usage_command(atom_to_list(Name), 100, false, 1000000),
+    DocsLink = [
+        ?XE(<<"p">>, [
+            ?C(<<"View ">>),
+            ?AC(
+                <<"https://docs.ejabberd.im/developer/ejabberd-api/admin-api/#", NameBin/binary>>,
+                NameBin
+            ),
+            ?C(<<" in ejabberd Docs">>)
+        ])
+    ],
+    MaybeDocsLink =
+        case lists:member(internal, Tags) of
+            true -> [];
+            false -> DocsLink
+        end,
     [
         ?XE(
             <<"details">>,
             [
                 ?XE(<<"summary">>, [?XC(<<"strong">>, NiceNameBin)]),
                 ?XC(<<"pre">>, list_to_binary(Text))
-            ] ++
-                [
-                    ?XE(
-                        <<"p">>,
-                        [
-                            ?C(<<"View ">>),
-                            ?AC(
-                                <<"https://docs.ejabberd.im/developer/ejabberd-api/admin-api/#",
-                                    NameBin/binary>>,
-                                NameBin
-                            ),
-                            ?C(<<" in ejabberd Docs">>)
-                        ]
-                    )
-                ]
+            ] ++ MaybeDocsLink
         )
     ].
+
+nice_this(This, integer) ->
+    {nice_this(This), right};
+nice_this(This, _Format) ->
+    nice_this(This).
 
 -spec nice_this(This :: atom() | string() | [byte()]) -> NiceThis :: binary().
 
@@ -2129,7 +2135,10 @@ make_command_result_element(
     ResultLinks,
     {PageSize, RPath}
 ) ->
-    HeadElements = [nice_this(ElementName) || {ElementName, _ElementFormat} <- TupleElements],
+    HeadElements = [
+        nice_this(ElementName, ElementFormat)
+     || {ElementName, ElementFormat} <- TupleElements
+    ],
     ContentElements = [
         list_to_tuple([
             make_result(
@@ -2226,6 +2235,16 @@ make_result(Binary, ElementName, _ArgumentsUsed, [{ResultName, host, Level, Appe
     UrlBinary = replace_url_elements(
         [<<"server/">>, host, <<"/">>, Append],
         [{host, Binary}],
+        Level
+    ),
+    ?AC(UrlBinary, Binary);
+make_result(Binary, ElementName, _ArgumentsUsed, [{ResultName, mnesia_table, Level, Append}]) when
+    (ElementName == ResultName) or (ElementName == unknown_element_name)
+->
+    Node = atom_to_binary(node()),
+    UrlBinary = replace_url_elements(
+        [<<"node/">>, node, <<"/db/table/">>, tablename, <<"/">>, Append],
+        [{node, Node}, {tablename, Binary}],
         Level
     ),
     ?AC(UrlBinary, Binary);
